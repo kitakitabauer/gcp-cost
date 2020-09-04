@@ -3,14 +3,13 @@ package main
 import (
 	"os"
 	"testing"
-	"time"
 
 	"cloud.google.com/go/bigquery"
 	"github.com/kylelemons/godebug/pretty"
 )
 
 func init() {
-	os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "../key/credentials.json")
+	os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "../key/gcp-cost-xxxx.json")
 }
 
 func TestBigQueryImpl_CreateQuery(t *testing.T) {
@@ -23,8 +22,8 @@ func TestBigQueryImpl_CreateQuery(t *testing.T) {
 	}{
 		{
 			"ok",
-			"20180601",
-			"\nSELECT " + Selector + "\nFROM " + TableName + ".20180601\nWHERE\n  ProjectID = \"" + ProjectID + "\" AND\n  Cost > 0\nORDER BY\n  Cost desc\n",
+			"2020/04/10",
+			"\nSELECT" + Selector + "\nFROM billing.gcp_billing_export_v1_00CAC5_AADE6E_BC76F8\nWHERE\n\tformat_timestamp('%Y/%m/%d', usage_start_time, 'Asia/Tokyo') = \"2020/04/10\"\n\tand project.name = 'liverpool'\nGROUP BY\n\tday, service\nORDER BY\n\tcost desc\n",
 		},
 	}
 
@@ -44,39 +43,8 @@ func TestBigQueryImpl_CreateQuery(t *testing.T) {
 	}
 }
 
-func TestBigQueryImpl_SelectTable(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		in   BigQuery
-		out  error
-	}{
-		{
-			"ok",
-			&BigQueryImpl{},
-			nil,
-		},
-	}
-
-	targetYmd := time.Now().AddDate(0, 0, -2).Format("20060102")
-	query := "SELECT " + Selector + " FROM " + TableName + "." + targetYmd + " WHERE project.id = \"" + ProjectID + "\" AND cost > 0 ORDER BY cost desc"
-
-	for _, v := range tests {
-		t.Run(v.name, func(t *testing.T) {
-			_, err := v.in.SelectTable(query)
-
-			if err != v.out {
-				t.Errorf("input %v\n, get: %#v\n, want: %#v\n", v.in, err, v.out)
-			}
-		})
-	}
-}
-
 func TestConvertStruct(t *testing.T) {
 	t.Parallel()
-
-	now := time.Now()
 
 	tests := []struct {
 		name string
@@ -86,18 +54,13 @@ func TestConvertStruct(t *testing.T) {
 		{
 			"ok",
 			[]bigquery.Value{
-				"hoge",
-				now,
-				now,
+				"2020/04/10",
+				"Big Query",
 				123.06508,
-				"USD",
 			},
 			CostResult{
-				ResourceType: "hoge",
-				Start:        now.String(),
-				End:          now.String(),
-				Cost:         123.06508,
-				Currency:     "USD",
+				Service: "Big Query",
+				Cost:    123.06508,
 			},
 		},
 	}

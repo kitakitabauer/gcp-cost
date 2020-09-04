@@ -4,27 +4,16 @@ This batch sends cost of google cloud platform from BigQuery.
 ## Usage
 Set environmental variables for BigQuery.
 ```
-$ export GOOGLE_APPLICATION_CREDENTIALS=../key/credentials.json
+$ export GOOGLE_APPLICATION_CREDENTIALS=../key/gcp-cost-XXX.json
 ```
 
-Set environment variables in codes.
+Run command with some parameters.
 ```
-slack.go
- slackToken     = "" // your token
- slackChannel   = "" // your channel
- slackIconEmoji = "" // your icon emoji
-
-biguery.go
- ProjectID = "" // your project ID
- TableName = "" // your table name
-```
-
-Build and run command with a parameter.
-```
-$ ./gcp-cost -targetYmd 20170725
+$ ./gcp-cost -targetYmd 2020/04/10 -channel #api-server
 ```
 
 ## Parameters
 |Parameter|Rule|Description|Example|
 |---|---|---|---|
-|targetYmd|required|Target date to collect billing of Google Cloud Platform.<br>When you set targetYmd ``20170725``, this batch aggregates GCP billing from 2017/07/25 00:00:00 +0000 UTC to 2017/07/26 07:00:00 +0000 UTC.|20170725|
+|targetYmd|required|Target date to collect billing of Google Cloud Platform.<br>When you set targetYmd ``2020/04/10``, this batch aggregates GCP billing from 2020/04/10 00:00:00 +0000 UTC to 2020/04/10 23:59:59 +0000 UTC.|2020/04/10|
+|channel|required|Set the channel name or channel ID of slack you want to notify.| #api-server |

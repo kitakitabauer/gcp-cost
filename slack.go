@@ -1,22 +1,10 @@
 package main
 
 import (
-	nSlack "github.com/nlopes/slack"
-	"sort"
 	"strconv"
-)
 
-type Type struct {
-	Cost       float64
-	Attachment nSlack.Attachment
-}
-
-const (
-	slackToken     = "" // your token
-	slackChannel   = "" // your channel
-	slackIconEmoji = "" // your icon emoji
-
-	thresoldOfDisplayUSD = 0.01
+	"github.com/nlopes/slack"
+	nSlack "github.com/nlopes/slack"
 )
 
 var (
@@ -31,60 +19,14 @@ var (
 	}
 )
 
+const slackToken = "" // your token
+
 func init() {
 	slackCli = nSlack.New(slackToken)
 }
 
-func divideType(costs []CostResult) map[string][]CostResult {
-	m := make(map[string][]CostResult, len(costs))
-	for _, cost := range costs {
-		if _, found := m[cost.ResourceType]; !found {
-			m[cost.ResourceType] = []CostResult{cost}
-		} else {
-			m[cost.ResourceType] = append(m[cost.ResourceType], cost)
-		}
-	}
-	return m
-}
-
 func float64ToString(f float64, prec int) string {
 	return strconv.FormatFloat(f, 'f', prec, 64)
-}
-
-func calcTypeCost(service string, costs []CostResult) Type {
-	var fields []nSlack.AttachmentField
-	var typeCost float64
-	for _, cost := range costs {
-		if cost.Cost <= thresoldOfDisplayUSD {
-			// do not display because it's too low price
-			sumCost += cost.Cost
-			continue
-		}
-
-		field := nSlack.AttachmentField{
-			Title: cost.ResourceType,
-			Value: float64ToString(cost.Cost, 3) + " (" + cost.Currency + ")",
-			Short: true,
-		}
-		fields = append(fields, field)
-
-		sumCost += cost.Cost
-		typeCost += cost.Cost
-	}
-
-	return Type{
-		Cost: typeCost,
-		Attachment: nSlack.Attachment{
-			Title:  "[" + service + "]",
-			Fields: fields,
-		},
-	}
-}
-
-func sortCost(groups []Type) {
-	sort.Slice(groups, func(i, j int) bool {
-		return groups[i].Cost > groups[j].Cost
-	})
 }
 
 func selectColor(idx int) string {
@@ -99,39 +41,46 @@ func selectColorIndex(idx int) int {
 	return idx
 }
 
-func sendToSlack(targetYmd string, costs []CostResult) error {
-	types := divideType(costs)
-	typeCosts := make([]Type, 0, len(types))
-	for name, t := range types {
-		_type := calcTypeCost(name, t)
-		if _type.Cost == 0 {
+func sendToSlack(targetYmd, channel string, costs []CostResult) error {
+	var colorIndex int
+	attachments := make([]nSlack.Attachment, 0, len(costs)+1)
+	for i := range costs {
+		if costs[i].Cost == 0 {
 			continue
 		}
-		typeCosts = append(typeCosts, _type)
-	}
 
-	sortCost(typeCosts)
+		attachment := nSlack.Attachment{
+			Color: selectColor(colorIndex),
+			Fields: []nSlack.AttachmentField{
+				{
+					Title: costs[i].Service,
+					Value: float64ToString(costs[i].Cost, 3) + " (USD)",
+					Short: true,
+				},
+			},
+		}
+		attachments = append(attachments, attachment)
+		sumCost += costs[i].Cost
 
-	var colorIndex int
-	attachments := make([]nSlack.Attachment, 0, len(typeCosts))
-	for _, _type := range typeCosts {
-		_type.Attachment.Color = selectColor(colorIndex)
 		colorIndex = selectColorIndex(colorIndex)
-
-		attachments = append(attachments, _type.Attachment)
-	}
-
-	msg := nSlack.PostMessageParameters{
-		Username:    "GCP Cost of " + targetYmd,
-		Channel:     slackChannel,
-		IconEmoji:   slackIconEmoji,
-		Attachments: attachments,
 	}
 
 	total := "-------------------------------------\nTotal cost: " +
-		float64ToString(sumCost, 6) +
-		" (" + costs[0].Currency +
-		")\n-------------------------------------"
-	_, _, err := slackCli.PostMessage(msg.Channel, total, msg)
+		float64ToString(sumCost, 3) +
+		" (USD)\n-------------------------------------"
+
+	attachments = append([]nSlack.Attachment{{Text: total}}, attachments[0:]...)
+
+	msg := nSlack.PostMessageParameters{
+		Username:  "GCP Cost of " + targetYmd,
+		Channel:   channel,
+		IconEmoji: ":gcp:",
+	}
+
+	_, _, err := slackCli.PostMessage(
+		msg.Channel,
+		slack.MsgOptionPostMessageParameters(msg),
+		slack.MsgOptionAttachments(attachments...),
+	)
 	return err
 }

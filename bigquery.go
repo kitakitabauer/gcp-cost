@@ -3,35 +3,35 @@ package main
 import (
 	"bytes"
 	"context"
-	"log"
 	"strconv"
 	"text/template"
-	"time"
 
 	"cloud.google.com/go/bigquery"
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 	"google.golang.org/api/iterator"
 )
 
 const (
-	ProjectID = "" // your project ID
-	TableName = "" // your table name
-
-	Selector = `
-  resource_type,
-  start_time,
-  end_time,
-  cost,
-  usage.unit`
-
+	ProjectCost = "gcp-cost"
+	Selector    = `
+	format_timestamp('%Y/%m/%d', usage_start_time, 'Asia/Tokyo') as day,
+	service.description as service,
+	round(
+		(sum(cost) +
+			sum(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c), 0))
+		) * 100) / 100 as cost,
+`
 	QueryTemplate = `
-SELECT {{.Selector}}
-FROM {{.TableName}}.{{.TargetYmd}}
+SELECT{{.Selector}}
+FROM billing.gcp_billing_export_v1_00CAC5_AADE6E_BC76F8
 WHERE
-  project.id = "{{.ProjectID}}" AND
-  cost > 0
+	format_timestamp('%Y/%m/%d', usage_start_time, 'Asia/Tokyo') = "{{.TargetYmd}}"
+	and project.name = 'liverpool'
+GROUP BY
+	day, service
 ORDER BY
-  cost desc
+	cost desc
 `
 )
 
@@ -39,33 +39,29 @@ type (
 	QueryVars struct {
 		Selector  string
 		TargetYmd string
-		TableName string
 		ProjectID string
 	}
 
 	CostResult struct {
-		ResourceType string
-		Start        string
-		End          string
-		Cost         float64
-		Currency     string
+		Service string
+		Cost    float64
 	}
 )
 
-type BigQuery interface {
+type bigQuery interface {
 	CreateQuery(targetYmd string) (string, error)
 	SelectTable(query string) ([]CostResult, error)
 }
 
 // BigQueryImpl implementes BigQuery interface.
-type BigQueryImpl struct{}
+type BigQueryImpl struct {
+	log *zap.Logger
+}
 
 func (b *BigQueryImpl) CreateQuery(targetYmd string) (string, error) {
 	vars := QueryVars{
 		Selector:  Selector,
 		TargetYmd: targetYmd,
-		TableName: TableName,
-		ProjectID: ProjectID,
 	}
 
 	var msg bytes.Buffer
@@ -80,8 +76,9 @@ func (b *BigQueryImpl) CreateQuery(targetYmd string) (string, error) {
 
 func (b *BigQueryImpl) SelectTable(query string) ([]CostResult, error) {
 	ctx := context.Background()
-	cli, err := bigquery.NewClient(ctx, ProjectID)
+	cli, err := bigquery.NewClient(ctx, ProjectCost)
 	if err != nil {
+		b.log.Error("bigquery.new.client.error", zap.Error(err))
 		return nil, err
 	}
 	defer cli.Close()
@@ -89,6 +86,7 @@ func (b *BigQueryImpl) SelectTable(query string) ([]CostResult, error) {
 	q := cli.Query(query)
 	iter, err := q.Read(ctx)
 	if err != nil {
+		b.log.Error("bigquery.read.error", zap.Error(err))
 		return nil, err
 	}
 
@@ -101,9 +99,11 @@ func (b *BigQueryImpl) SelectTable(query string) ([]CostResult, error) {
 			break
 		}
 		if err != nil {
-			log.Printf("Failed to iterate: %v", err)
+			b.log.Error("bigquery.iterate.error", zap.Error(err))
 			continue
 		}
+
+		b.log.Info("SelectTable", zap.Any("value", values))
 
 		res = append(res, convertStruct(values))
 	}
@@ -116,22 +116,11 @@ func convertStruct(values []bigquery.Value) CostResult {
 	for i := range values {
 		switch i {
 		case 0:
-			res.ResourceType = values[i].(string)
-			break
+			continue
 		case 1:
-			t := values[i].(time.Time)
-			res.Start = t.String()
-			break
+			res.Service = values[i].(string)
 		case 2:
-			t := values[i].(time.Time)
-			res.End = t.String()
-			break
-		case 3:
 			res.Cost = values[i].(float64)
-			break
-		case 4:
-			res.Currency = values[i].(string)
-			break
 		default:
 			panic("Unexpected index: " + strconv.Itoa(i))
 		}
